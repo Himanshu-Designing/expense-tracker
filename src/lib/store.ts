@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { StorageError } from "./errors";
 import { filterExpenses } from "./summary";
 import type { Expense, ExpenseFilter, ExpenseInput } from "./types";
 
@@ -31,24 +32,33 @@ async function readAll(): Promise<Expense[]> {
     raw = await fs.readFile(/* turbopackIgnore: true */ DATA_FILE, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
+    throw new StorageError(`Could not read ${DATA_FILE}.`, error);
   }
   if (raw.trim() === "") return [];
 
-  const parsed: unknown = JSON.parse(raw);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new StorageError(`${DATA_FILE} is not valid JSON.`, error);
+  }
   if (!Array.isArray(parsed)) {
-    throw new Error(`${DATA_FILE} does not contain a JSON array.`);
+    throw new StorageError(`${DATA_FILE} does not contain a JSON array.`);
   }
   return parsed as Expense[];
 }
 
 async function writeAll(expenses: Expense[]): Promise<void> {
-  await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-  // Write to a temp file and rename, so a crash mid-write can't leave a
-  // half-written data file behind.
-  const tempFile = `${DATA_FILE}.tmp`;
-  await fs.writeFile(tempFile, JSON.stringify(expenses, null, 2), "utf8");
-  await fs.rename(tempFile, DATA_FILE);
+  try {
+    await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
+    // Write to a temp file and rename, so a crash mid-write can't leave a
+    // half-written data file behind.
+    const tempFile = `${DATA_FILE}.tmp`;
+    await fs.writeFile(tempFile, JSON.stringify(expenses, null, 2), "utf8");
+    await fs.rename(tempFile, DATA_FILE);
+  } catch (error) {
+    throw new StorageError(`Could not write ${DATA_FILE}.`, error);
+  }
 }
 
 function newestFirst(a: Expense, b: Expense): number {
